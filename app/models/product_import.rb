@@ -312,10 +312,12 @@ class ProductImport < ActiveRecord::Base
     taxonomy = Taxonomy.find(:first, :conditions => ["lower(name) = ?", taxonomy])
     taxonomy = Taxonomy.create(:name => taxonomy_name.capitalize) if taxonomy.nil? && IMPORT_PRODUCT_SETTINGS[:create_missing_taxonomies]
 
-    taxon_hierarchy.split(/\s*\&\s*/).each do |hierarchy|
-      hierarchy = hierarchy.split(/\s*>\s*/)
+    taxon_hierarchy.split(/\s*!\\\&\s*/).each do |hierarchy|
+      hierarchy = hierarchy.split(/\s*!\\>\s*/)
       last_taxon = taxonomy.root
       hierarchy.each do |taxon|
+        taxon.gsub!('\\&','&')
+        taxon.gsub!('\\>','>')
         last_taxon = last_taxon.children.find_or_create_by_name_and_taxonomy_id(taxon, taxonomy.id)
       end
 

@@ -120,8 +120,25 @@ module Spree
 
           variant_comparator_field = Spree::ProductImport.settings[:variant_comparator_field].try :to_sym
           variant_comparator_column = col[variant_comparator_field]
-
-          if Spree::ProductImport.settings[:create_variants] and variant_comparator_column and
+          p = nil
+          
+          if Spree::ProductImport.settings[:create_variants] and variant_comparator_column and 
+            variant_comparator_field == :identifier
+            
+            p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku like ?", row[variant_comparator_column]+"%").first
+            log("data: #{p.inspect}")
+            if p.nil?
+              p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku" => row[variant_comparator_column]).first
+            end
+            if !p.nil?
+              log("found product with this field #{variant_comparator_field} like #{row[variant_comparator_column]} data: #{p.inspect}")
+              p.update_attribute(:deleted_at, nil) if p.deleted_at #Un-delete product if it is there
+              p.variants.each { |variant| variant.update_attribute(:deleted_at, nil) }
+              create_variant_for(p, :with => product_information)
+            else
+              next unless create_product_using(product_information)
+            end
+          elsif Spree::ProductImport.settings[:create_variants] and variant_comparator_column and
             p = Spree::Product.where(variant_comparator_field => row[variant_comparator_column]).first
 
             log("found product with this field #{variant_comparator_field}=#{row[variant_comparator_column]}")

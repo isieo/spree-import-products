@@ -89,11 +89,21 @@ module Spree
         #Get products *before* import -
         @products_before_import = Spree::Product.all
         @names_of_products_before_import = @products_before_import.map(&:name)
+        @option_types_fields = []
 
         rows = CSV.read(self.data_file.path)
 
         if Spree::ProductImport.settings[:first_row_is_headings]
           col = get_column_mappings(rows[0])
+          
+          rows[0].each do |field, value|
+            option_type = Spree::OptionType.find(:first, :conditions => [
+              "lower(presentation) = ? OR lower(name) = ?",
+              field.to_s.downcase, field.to_s.downcase]
+            )
+            @option_types_fields << option_type.name if option_type
+          end
+
         else
           col = Spree::ProductImport.settings[:column_mappings]
         end
@@ -122,8 +132,17 @@ module Spree
           variant_comparator_column = col[variant_comparator_field]
           p = nil
           
-          if Spree::ProductImport.settings[:create_variants] and variant_comparator_column and 
-            variant_comparator_field == :identifier
+          valid_variant = false
+
+          @option_types_fields.each do |ot|
+            if !col[ot.to_sym].blank?
+              valid_variant = true
+              break
+            end
+          end
+          
+          if valid_variant and Spree::ProductImport.settings[:create_variants] and variant_comparator_column and 
+            variant_comparator_field == :identifier and 
             
             p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku like ?", row[variant_comparator_column]+"%").first
             log("data: #{p.inspect}")
@@ -138,7 +157,7 @@ module Spree
             else
               next unless create_product_using(product_information)
             end
-          elsif Spree::ProductImport.settings[:create_variants] and variant_comparator_column and
+          elsif valid_variant and Spree::ProductImport.settings[:create_variants] and variant_comparator_column and
             p = Spree::Product.where(variant_comparator_field => row[variant_comparator_column]).first
 
             log("found product with this field #{variant_comparator_field}=#{row[variant_comparator_column]}")

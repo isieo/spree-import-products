@@ -135,38 +135,59 @@ module Spree
           valid_variant = false
 
           @option_types_fields.each do |ot|
-            if !col[ot.to_sym].blank?
+            if !col[ot.downcase.to_sym].blank?
               valid_variant = true
               break
             end
           end
           
-          if valid_variant and Spree::ProductImport.settings[:create_variants] and variant_comparator_column and 
-            variant_comparator_field == :identifier and 
-            
-            p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku like ?", row[variant_comparator_column]+"%").first
-            log("data: #{p.inspect}")
-            if p.nil?
-              p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku" => row[variant_comparator_column]).first
+
+          #disable product
+          if product_information[:disable] == "yes" || product_information[:disable] == "YES" || product_information[:disable] == "Yes"
+            disable_product = nil
+            Spree::Variant.where(:sku => product_information[:sku]).each do |var|
+              if !var.product.blank?
+                disable_product = var.product
+              else
+                disable_product = nil
+              end
             end
-            if !p.nil?
-              log("found product with this field #{variant_comparator_field} like #{row[variant_comparator_column]} data: #{p.inspect}")
+            next if disable_product.nil?
+            log("Disabling #{disable_product.sku}")
+            disable_product.available_on = "3000-12-31"
+            disable_product.save!
+          else
+            #check if identifier is valid then create variant
+            if valid_variant and Spree::ProductImport.settings[:create_variants] and variant_comparator_column and 
+              variant_comparator_field == :identifier
+              
+              p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku like ?", row[variant_comparator_column]+"%").first
+              log("DATA is : #{p.inspect}")
+              if p.nil?
+                p = Spree::Product.includes(:variants_including_master => :option_values).where("spree_variants.sku" => row[variant_comparator_column]).first
+              end
+              if !p.nil?
+                log("found product with this field #{variant_comparator_field} like #{row[variant_comparator_column]} data: #{p.inspect}")
+                p.update_attribute(:deleted_at, nil) if p.deleted_at #Un-delete product if it is there
+                p.variants.each { |variant| variant.update_attribute(:deleted_at, nil) }
+                create_variant_for(p, :with => product_information)
+              else
+                next unless create_product_using(product_information)
+              end
+            elsif valid_variant and Spree::ProductImport.settings[:create_variants] and variant_comparator_column and
+              p = Spree::Product.where(variant_comparator_field => row[variant_comparator_column]).first
+
+              log("found product with this field #{variant_comparator_field}=#{row[variant_comparator_column]}")
               p.update_attribute(:deleted_at, nil) if p.deleted_at #Un-delete product if it is there
               p.variants.each { |variant| variant.update_attribute(:deleted_at, nil) }
               create_variant_for(p, :with => product_information)
             else
+              log ("No Master Product Found, creating product")
               next unless create_product_using(product_information)
             end
-          elsif valid_variant and Spree::ProductImport.settings[:create_variants] and variant_comparator_column and
-            p = Spree::Product.where(variant_comparator_field => row[variant_comparator_column]).first
-
-            log("found product with this field #{variant_comparator_field}=#{row[variant_comparator_column]}")
-            p.update_attribute(:deleted_at, nil) if p.deleted_at #Un-delete product if it is there
-            p.variants.each { |variant| variant.update_attribute(:deleted_at, nil) }
-            create_variant_for(p, :with => product_information)
-          else
-            next unless create_product_using(product_information)
           end
+          
+
         end
 
         if Spree::ProductImport.settings[:destroy_original_products]
@@ -286,7 +307,23 @@ module Spree
       else
         #Save the object before creating asssociated objects
         product.save and product_ids << product.id
-
+        
+        
+        
+        params_hash.keys.each do |field|
+          option_type = Spree::OptionType.find(:first, :conditions => [
+            "lower(presentation) = ? OR lower(name) = ?",
+            field.to_s.downcase, field.to_s.downcase]
+          )
+          if option_type
+            value = params_hash[field.downcase.to_sym]
+            product.option_types << option_type unless product.option_types.include?(option_type)
+            opt_value = option_type.option_values.where(["presentation = ? OR name = ?", value, value]).first
+            opt_value = option_type.option_values.create(:presentation => value, :name => value) unless opt_value
+            product.master.option_values << opt_value unless product.master.option_values.include?(opt_value)
+          end
+        end
+       
 
         #Associate our new product with any taxonomies that we need to worry about
         Spree::ProductImport.settings[:taxonomy_fields].each do |field|

@@ -154,7 +154,7 @@ module Spree
             end
             next if disable_product.nil?
             log("Disabling #{disable_product.sku}")
-            disable_product.available_on = "3000-12-31"
+            disable_product.deleted_at=Time.now
             disable_product.save!
           else
             #check if identifier is valid then create variant
